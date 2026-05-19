@@ -1433,6 +1433,19 @@ function renderMain() {
 
     <div class="card">
       <div class="card-header">
+        <span class="card-title"><i class="ti ti-chart-bar" style="font-size:14px; color:#EF9F27;"></i>광고비 소진에 따른 일자별 매출</span>
+        <span class="card-meta">타겟 + 내부광고 합산</span>
+      </div>
+      <div style="display:flex; gap:14px; justify-content:flex-end; margin-bottom:8px; font-size:11px; color:var(--text-secondary); flex-wrap:wrap;">
+        <span style="display:flex; align-items:center; gap:5px;"><span style="width:9px; height:9px; background:#EF9F27; border-radius:2px;"></span>타겟 광고비</span>
+        <span style="display:flex; align-items:center; gap:5px;"><span style="width:9px; height:9px; background:#534AB7; border-radius:2px;"></span>내부 광고비</span>
+        <span style="display:flex; align-items:center; gap:5px;"><span style="width:16px; height:2px; background:#185FA5;"></span>일별 매출</span>
+      </div>
+      <div style="position:relative; width:100%; height:240px;"><canvas id="main-daily-chart"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
         <span class="card-title"><i class="ti ti-target" style="font-size:14px; color:var(--accent-primary);"></i>타겟광고</span>
         <span class="card-meta">선택 기간 누적 기준</span>
       </div>
@@ -1650,13 +1663,107 @@ function drawNotifConversionChart() {
   }).join('');
 }
 
+// 본펀딩 탭의 일별 광고비/매출 차트
+// 타겟 광고비/매출 + 내부광고가 진행된 날의 광고비/매출 합산
+function drawMainDailyChart() {
+  const canvas = document.getElementById('main-daily-chart');
+  if (!canvas) return;
+  if (!data.mainTarget) return;
+
+  const labels = []; for (let i=startIdx; i<=endIdx; i++) labels.push(fmt.dateMD(i));
+
+  // 타겟 광고 일별 데이터
+  const targetSpend = data.mainTarget.spend || [];
+  const targetRev = data.mainTarget.convRevenue || [];
+
+  // 내부 광고를 날짜별로 매핑 (yyyy-mm-dd → {spend, conv}
+  const internalByDate = {};
+  (data.mainInternalAds || []).forEach(ad => {
+    // ad.date는 "2026.05.15" 형식, 시트 dates는 "2026-05-15" 형식
+    const iso = ad.date.replace(/\./g, '-');
+    internalByDate[iso] = {
+      spend: ad.spend || 0,
+      revenue: ad.convRevenue || 0
+    };
+  });
+
+  // 일자별 데이터 (타겟 / 내부 분리)
+  const targetSpendArr = [];
+  const internalSpendArr = [];
+  const combinedRev = [];
+  for (let i = startIdx; i <= endIdx; i++) {
+    const dateISO = data.dates[i];
+    const tSpend = targetSpend[i] || 0;
+    const tRev = targetRev[i] || 0;
+    const internal = internalByDate[dateISO] || { spend: 0, revenue: 0 };
+    targetSpendArr.push(tSpend);
+    internalSpendArr.push(internal.spend);
+    combinedRev.push(tRev + internal.revenue);
+  }
+
+  chartInstances.push(new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '타겟 광고비',
+          data: targetSpendArr,
+          backgroundColor: '#EF9F27',
+          yAxisID: 'y',
+          stack: 'spend',
+          order: 3
+        },
+        {
+          label: '내부 광고비',
+          data: internalSpendArr,
+          backgroundColor: '#534AB7',
+          yAxisID: 'y',
+          stack: 'spend',
+          order: 2
+        },
+        {
+          label: '일별 매출',
+          data: combinedRev,
+          type: 'line',
+          borderColor: '#185FA5',
+          backgroundColor: '#185FA5',
+          yAxisID: 'y1',
+          tension: 0.3,
+          pointRadius: 3,
+          borderWidth: 2.5,
+          fill: false,
+          order: 1
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: c => c.dataset.label + ': ' + fmt.won(c.parsed.y)
+          }
+        }
+      },
+      scales: {
+        y: { stacked: true, position:'left', ticks:{callback:v=>fmt.wonAxis(v), font:{size:10}}, grid:{color:'rgba(128,128,128,0.08)'} },
+        y1: { position:'right', ticks:{callback:v=>fmt.wonAxis(v), font:{size:10}}, grid:{display:false} },
+        x: { stacked: true, ticks:{font:{size:9}, autoSkip:true, maxRotation:0}, grid:{display:false} }
+      }
+    }
+  }));
+}
+
 function updateContent() {
   if (isLoading) return;
   destroyCharts();
   const c = document.getElementById('content');
   if (currentSheet === 'summary') { c.innerHTML = renderSummary(); drawSummaryCharts(); }
   else if (currentSheet === 'pre') { c.innerHTML = renderPre(); drawMetricChart(); drawNotifConversionChart(); }
-  else { c.innerHTML = renderMain(); drawMetricChart(); }
+  else { c.innerHTML = renderMain(); drawMetricChart(); drawMainDailyChart(); }
 }
 
 function updateAll() {
